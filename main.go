@@ -1,69 +1,70 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"log"
-	"net/url"
+	"net/http"
 	"os"
+	"time"
 
-	"github.com/go-openapi/strfmt"
-	goapi "github.com/grafana/grafana-openapi-client-go/client"
 	sinksdk "github.com/numaproj/numaflow-go/pkg/sinker"
 )
 
-// grafanaSink is a sinker implementation that sends data to grafana
-type grafanaSink struct {
-	client *goapi.GrafanaHTTPAPI
+// grafanaLogSink is a sinker implementation that sends data to grafana
+type grafanaLogSink struct {
+	url        string
+	httpClient *http.Client
 }
 
-func newGrafanaSink(host, basePath string) *grafanaSink {
-	cfg := &goapi.TransportConfig{
-		// Host is the doman name or IP address of the host that serves the API.
-		Host: host,
-		// BasePath is the URL prefix for all API paths, relative to the host root.
-		BasePath: basePath,
-		// Schemes are the transfer protocols used by the API (http or https).
-		Schemes: []string{"http"},
-		// APIKey is an optional API key or service account token.
-		APIKey: os.Getenv("API_ACCESS_TOKEN"),
-		// BasicAuth is optional basic auth credentials.
-		BasicAuth: url.UserPassword("admin", "admin"),
-		// OrgID provides an optional organization ID.
-		// OrgID is only supported with BasicAuth since API keys are already org-scoped.
-		OrgID: 1,
-		// TLSConfig provides an optional configuration for a TLS client
-		TLSConfig: &tls.Config{},
-		// NumRetries contains the optional number of attempted retries
-		NumRetries: 3,
-		// RetryTimeout sets an optional time to wait before retrying a request
-		RetryTimeout: 0,
-		// RetryStatusCodes contains the optional list of status codes to retry
-		// Use "x" as a wildcard for a single digit (default: [429, 5xx])
-		RetryStatusCodes: []string{"420", "5xx"},
-		// HTTPHeaders contains an optional map of HTTP headers to add to each request
-		HTTPHeaders: map[string]string{},
-	}
-	return &grafanaSink{
-		client: goapi.NewHTTPClientWithConfig(strfmt.Default, cfg),
+func newGrafanaSink(url string) *grafanaLogSink {
+	return &grafanaLogSink{
+		url: url,
+		httpClient: &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+			Timeout: time.Second * 1,
+		},
 	}
 }
 
-func (l *grafanaSink) Sink(ctx context.Context, datumStreamCh <-chan sinksdk.Datum) sinksdk.Responses {
+func (gs *grafanaLogSink) Sink(ctx context.Context, datumStreamCh <-chan sinksdk.Datum) sinksdk.Responses {
 	result := sinksdk.ResponsesBuilder()
+
+	var buffer bytes.Buffer
+	buffer.WriteString(`{"streams": [{"stream": {}, "values": [`)
+
+	fmt.Println(buffer.String())
 	for d := range datumStreamCh {
-		l.client.
-			fmt.Println("User Defined Sink:", string(d.Value()))
+
+		log := fmt.Sprintf(`["%s", "%s"]`)
+
+		buffer.WriteString(string(d.Value()))
 		id := d.ID()
 		result = result.Append(sinksdk.ResponseOK(id))
-		// if we are not able to write to sink and if we have a fallback sink configured
-		// we can use sinksdk.ResponseFallback(id)) to write the message to fallback sink
+
 	}
+	buffer.WriteString(`]}]}`)
+
+	// logs := []byte(fmt.Sprintf("{"streams": [{"stream": {"Language": "Go", "source": "Code" }, "values": [["%s", "This is my log line"]]}]}", strconv.FormatInt(time.Now().UnixNano(), 10)))
+
+	req, err := http.NewRequest("POST", gs.url, bytes.NewBuffer(logs))
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth("299424", "your-api-key")
+	client.Do(req)
+
 	return result
 }
 
 func main() {
-	err := sinksdk.NewServer(newGrafanaSink("host", "path")).Start(context.Background())
+	err := sinksdk.NewServer(grafanaLogSink("host", "path")).Start(context.Background())
 	if err != nil {
 		log.Panic("Failed to start sink function server: ", err)
 	}

@@ -1,4 +1,4 @@
-module github.com/whynowy/numaflow-grafana-sink
+module github.com/whynowy/numaflow-grafana-log-sink
 
 go 1.23.1
 
